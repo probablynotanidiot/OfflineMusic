@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Offline Music Player</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 2em;
+      background: #f4f4f4;
+    }
+    h1 {
+      margin-bottom: 0.5em;
+    }
+    button {
+      margin: 0.5em;
+      padding: 0.5em 1em;
+      font-size: 1em;
+    }
+    #status {
+      margin-top: 1em;
+      font-weight: bold;
+    }
+    #seekBarContainer {
+      margin-top: 1.5em;
+      width: 80%;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    #seekBar {
+      width: 100%;
+    }
+    #playlistContainer {
+      margin-top: 2em;
+      text-align: left;
+      display: inline-block;
+      max-height: 200px;
+      overflow-y: auto;
+      width: 80%;
+    }
+    #playlistContainer li {
+      cursor: pointer;
+      padding: 0.3em;
+      background-color: #eee;
+      margin-bottom: 0.2em;
+      border-radius: 5px;
+    }
+    #playlistContainer li:hover {
+      background-color: #ddd;
+    }
+    #playlistContainer li.active {
+      background-color: #b3d9ff;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Offline Music Player 🎵</h1>
+
+  <div>
+    <button id="chooseFolderBtn">📁 Choose Music Folder</button>
+  </div>
+
+  <div>
+    <button id="prevBtn">⏮️ Previous</button>
+    <button id="playPauseBtn">⏸️ Pause</button>
+    <button id="nextBtn">⏭️ Next</button>
+    <button id="shuffleBtn">🔀 Shuffle: Off</button>
+  </div>
+
+  <div id="seekBarContainer">
+    <input type="range" id="seekBar" value="0" min="0" max="100" step="1">
+  </div>
+
+  <div>
+    <button id="addToPlaylistBtn">➕ Add MP3s</button>
+  </div>
+
+  <p id="status">Choose a music folder to begin...</p>
+
+  <h3>Playlist</h3>
+  <ul id="playlistContainer"></ul>
+
+  <script>
+    const audio = new Audio();
+    const statusText = document.getElementById("status");
+    const playPauseBtn = document.getElementById("playPauseBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const prevBtn = document.getElementById("prevBtn");
+    const shuffleBtn = document.getElementById("shuffleBtn");
+    const seekBar = document.getElementById("seekBar");
+    const addToPlaylistBtn = document.getElementById("addToPlaylistBtn");
+    const playlistContainer = document.getElementById("playlistContainer");
+    const chooseFolderBtn = document.getElementById("chooseFolderBtn");
+
+    let playlist = [];
+    let currentTrack = 0;
+    let isPlaying = false;
+    let shuffle = false;
+    let musicDirectoryHandle = null;
+
+    chooseFolderBtn.addEventListener("click", async () => {
+      try {
+        musicDirectoryHandle = await window.showDirectoryPicker();
+        statusText.textContent = "Music folder selected!";
+        await loadMusicFilesFromFolder(musicDirectoryHandle);
+      } catch (err) {
+        console.error("Folder selection failed", err);
+        statusText.textContent = "Folder selection failed.";
+      }
+    });
+
+    async function loadMusicFilesFromFolder(folderHandle) {
+      playlist = [];
+      for await (const [name, handle] of folderHandle.entries()) {
+        if (handle.kind === 'file' && name.endsWith('.mp3')) {
+          const file = await handle.getFile();
+          const fileURL = URL.createObjectURL(file);
+          playlist.push({ name: file.name, url: fileURL });
+        }
+      }
+      updatePlaylistDisplay();
+      if (playlist.length > 0) playTrack(0);
+    }
+
+    addToPlaylistBtn.addEventListener("click", async () => {
+      if (!musicDirectoryHandle) {
+        alert("Please choose a music folder first.");
+        return;
+      }
+
+      const fileHandles = await window.showOpenFilePicker({
+        multiple: true,
+        types: [{ description: "MP3 Files", accept: { "audio/mpeg": [".mp3"] } }]
+      });
+
+      for (const fileHandle of fileHandles) {
+        const file = await fileHandle.getFile();
+        const newFileHandle = await musicDirectoryHandle.getFileHandle(file.name, { create: true });
+        const writable = await newFileHandle.createWritable();
+        await writable.write(await file.arrayBuffer());
+        await writable.close();
+      }
+
+      await loadMusicFilesFromFolder(musicDirectoryHandle);
+      statusText.textContent = "Files copied and added to playlist.";
+    });
+
+    function updatePlaylistDisplay() {
+      playlistContainer.innerHTML = '';
+      playlist.forEach((track, index) => {
+        const listItem = document.createElement("li");
+        listItem.textContent = track.name;
+        if (index === currentTrack) listItem.classList.add("active");
+        listItem.addEventListener("click", () => playTrack(index));
+        playlistContainer.appendChild(listItem);
+      });
+    }
+
+    function playTrack(index) {
+      currentTrack = index;
+      audio.src = playlist[currentTrack].url;
+      audio.play();
+      isPlaying = true;
+      playPauseBtn.textContent = "⏸️ Pause";
+      statusText.textContent = "Playing: " + playlist[currentTrack].name;
+
+      const items = playlistContainer.querySelectorAll("li");
+      items.forEach((item, i) => {
+        item.classList.toggle("active", i === index);
+      });
+    }
+
+    function playNextTrack() {
+      currentTrack++;
+      if (currentTrack >= playlist.length) currentTrack = 0;
+      playTrack(currentTrack);
+    }
+
+    function playPrevTrack() {
+      currentTrack--;
+      if (currentTrack < 0) currentTrack = playlist.length - 1;
+      playTrack(currentTrack);
+    }
+
+    function togglePlayPause() {
+      if (isPlaying) {
+        audio.pause();
+        playPauseBtn.textContent = "▶️ Play";
+        statusText.textContent = "Paused: " + playlist[currentTrack].name;
+      } else {
+        audio.play();
+        playPauseBtn.textContent = "⏸️ Pause";
+        statusText.textContent = "Playing: " + playlist[currentTrack].name;
+      }
+      isPlaying = !isPlaying;
+    }
+
+    function toggleShuffle() {
+      shuffle = !shuffle;
+      shuffleBtn.textContent = shuffle ? "🔀 Shuffle: On" : "🔀 Shuffle: Off";
+      if (shuffle) {
+        playlist = shuffleArray(playlist);
+        updatePlaylistDisplay();
+        playTrack(0);
+      }
+    }
+
+    function shuffleArray(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random()
